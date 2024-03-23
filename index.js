@@ -15,7 +15,10 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(cors());
+app.get("/",(req,res)=>{
+  res.send("Connected to server of khaijushop")
 
+})
 // Create order Here
 app.post("/api/createOrder", (req, res) => {
   console.log(req.body);
@@ -27,13 +30,13 @@ app.post("/api/createOrder", (req, res) => {
         );
     const formData = {
       amount: req.body.amount,
-      failure_url: "http://localhost:5173",
+      failure_url: "https://khaijushop.netlify.app",
       product_delivery_charge: "0",
       product_service_charge: "0",
       product_code: "EPAYTEST",
       signature: signature,
       signed_field_names: "total_amount,transaction_uuid,product_code",
-      success_url: "http://localhost:5173/cart",
+      success_url: "https://khaijushop.netlify.app/cart",
       tax_amount: "0",
       total_amount: req.body.amount,
       transaction_uuid: timeFormatted,

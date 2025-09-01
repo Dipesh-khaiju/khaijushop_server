@@ -107,6 +107,84 @@ app.get("/api/products/:id", async (req, res) => {
     });
   }
 });
+
+// Admin endpoints for product management
+
+// Create new product
+app.post("/api/admin/products", async (req, res) => {
+  try {
+    const product = new Product(req.body);
+    const savedProduct = await product.save();
+    res.status(201).json({
+      success: true,
+      message: "Product created successfully",
+      product: savedProduct
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: "Error creating product",
+      error: error.message
+    });
+  }
+});
+
+// Update product by ID
+app.put("/api/admin/products/:id", async (req, res) => {
+  try {
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Product updated successfully",
+      product
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: "Error updating product",
+      error: error.message
+    });
+  }
+});
+
+// Delete product by ID
+app.delete("/api/admin/products/:id", async (req, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+    
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Product deleted successfully",
+      product
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error deleting product",
+      error: error.message
+    });
+  }
+});
+
 // app.get("/api/esewa/success", handleEsewaSuccess, (req, res) => {
 //   res.send("success");
 // });

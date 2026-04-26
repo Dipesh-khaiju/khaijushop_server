@@ -1,8 +1,10 @@
 import express from "express";
+import mongoose from "mongoose";
 import createSignature from "./utility/Hashing.js";
 import handleEsewaSuccess from "./middleware/handleEsewaSuccess.js";
 import connectDatabase from "./connectDatabase.js";
 import Product from "./Product.js";
+import Order from "./Order.js";
 
 const app = express();
 
@@ -23,25 +25,39 @@ app.get("/", (req, res) => {
   res.send("Connected to server of khaijushop");
 });
 // Create order Here
-app.post("/api/createOrder", (req, res) => {
+app.post("/api/createOrder", async (req, res) => {
   console.log(req.body);
   try {
+    // Ensure amount is a properly formatted string with 2 decimals
+    const safeAmount = Number(req.body.amount).toFixed(2);
+
+    // Ensure transaction_uuid is highly unique to prevent 409 Conflict
     var currentTime = new Date();
-    var timeFormatted = moment(currentTime).format("YYYYMMDDHHmmss");
+    var timeFormatted = moment(currentTime).format("YYYYMMDDHHmmss") + "-" + Math.floor(Math.random() * 100000);
+
     const signature = createSignature(
-      `total_amount=${req.body.amount},transaction_uuid=${timeFormatted},product_code=EPAYTEST`
+      `total_amount=${safeAmount},transaction_uuid=${timeFormatted},product_code=EPAYTEST`
     );
+
+    const order = new Order({
+      transaction_uuid: timeFormatted,
+      amount: safeAmount,
+      products: req.body.products || []
+    });
+    await order.save();
+
+    const backendUrl = `${req.protocol}://${req.get('host')}`;
     const formData = {
-      amount: req.body.amount,
-      failure_url: "https://hamrooshop.netlify.app",
+      amount: safeAmount,
+      failure_url: "https://hamrooshop.netlify.app/payment-failed",
       product_delivery_charge: "0",
       product_service_charge: "0",
       product_code: "EPAYTEST",
       signature: signature,
       signed_field_names: "total_amount,transaction_uuid,product_code",
-      success_url: "https://hamrooshop.netlify.app/cart",
+      success_url: `${backendUrl}/api/esewa/verify`,
       tax_amount: "0",
-      total_amount: req.body.amount,
+      total_amount: safeAmount,
       transaction_uuid: timeFormatted,
     };
     res.json({
@@ -64,7 +80,7 @@ app.get("/api/products", async (req, res) => {
     const products = await Product.find()
       .skip(skip)
       .limit(limit);
-    
+
     const total = await Product.countDocuments();
 
     res.json({
@@ -137,14 +153,14 @@ app.put("/api/admin/products/:id", async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
-    
+
     if (!product) {
       return res.status(404).json({
         success: false,
         message: "Product not found"
       });
     }
-    
+
     res.json({
       success: true,
       message: "Product updated successfully",
@@ -163,14 +179,14 @@ app.put("/api/admin/products/:id", async (req, res) => {
 app.delete("/api/admin/products/:id", async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
-    
+
     if (!product) {
       return res.status(404).json({
         success: false,
         message: "Product not found"
       });
     }
-    
+
     res.json({
       success: true,
       message: "Product deleted successfully",
@@ -185,9 +201,57 @@ app.delete("/api/admin/products/:id", async (req, res) => {
   }
 });
 
-// app.get("/api/esewa/success", handleEsewaSuccess, (req, res) => {
-//   res.send("success");
-// });
+app.get("/api/esewa/verify", async (req, res) => {
+  try {
+    const { data } = req.query; // eSewa sends a base64 encoded 'data' query parameter
+
+    // 1. Decode the base64 string from eSewa
+    const decodedData = JSON.parse(Buffer.from(data, 'base64').toString('utf-8'));
+
+    // 2. Check if the payment was actually completed
+    if (decodedData.status === 'COMPLETE') {
+
+      // 3. Find the pending order in your database using the transaction_uuid eSewa returns
+      const order = await Order.findOne({ transaction_uuid: decodedData.transaction_uuid });
+
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      // 4. DECREASE THE STOCK IN THE DATABASE
+      // Added a check so if refreshed, stock won't decrease twice
+      if (order.status !== 'Completed') {
+        for (const item of order.products) {
+          if (item.product && item.quantity) {
+            let query = {};
+            if (mongoose.Types.ObjectId.isValid(item.product)) {
+              query = { _id: item.product };
+            } else {
+              query = { id: Number(item.product) || item.product };
+            }
+            await Product.findOneAndUpdate(
+              query,
+              { $inc: { stock: -item.quantity } }
+            );
+          }
+        }
+
+        // 5. Mark the order as Paid/Completed
+        order.paymentStatus = 'Paid';
+        order.status = 'Completed';
+        await order.save();
+      }
+
+      // 6. Redirect the user back to the frontend success page
+      return res.redirect('https://hamrooshop.netlify.app/success');
+    } else {
+      return res.redirect('https://hamrooshop.netlify.app/payment-failed');
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Verification Failed");
+  }
+});
 
 app.listen(process.env.PORT, () => {
   console.log(`App listening on port ${process.env.PORT}`);
